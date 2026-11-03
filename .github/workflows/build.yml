@@ -1,16 +1,13 @@
-name: Build
+name: Build APK
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
-permissions:
-  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: unzip -o HegaIsland.zip -d src
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -18,14 +15,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
-      - run: cd src && gradle assembleRelease --no-daemon
-      - run: cp src/app/build/outputs/apk/release/*.apk HegaIsland.apk
+      - run: gradle assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: HegaIsland
-          path: HegaIsland.apk
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.${{ github.run_number }}
-          name: Hega Island v1.${{ github.run_number }}
-          files: HegaIsland.apk
+          name: FenEtkin-apk
+          path: build/outputs/apk/debug/*.apk
