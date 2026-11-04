@@ -65,7 +65,13 @@ jobs:
           if [ "$ERR" = 1 ]; then
             exit 1
           fi
+          GV=8.14.3
+          if [ -f "$DIR/gradle-version.txt" ]; then
+            GV=$(tr -d ' \r\n' < "$DIR/gradle-version.txt")
+          fi
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "gradle=$GV" >> "$GITHUB_OUTPUT"
+          echo "Gradle surumu: $GV"
           echo "Kontrol tamam"
 
       - uses: actions/setup-java@v4
@@ -75,7 +81,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
+          gradle-version: ${{ steps.proje.outputs.gradle }}
 
       - name: Derle
         working-directory: ${{ steps.proje.outputs.dir }}
