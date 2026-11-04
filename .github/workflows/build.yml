@@ -1,22 +1,97 @@
-name: Build APK
+name: FenEtkin APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Proje bul ve kontrol et
+        id: proje
+        run: |
+          ERR=0
+          fail() { echo "::error::$1"; ERR=1; }
+          WORK="$RUNNER_TEMP/fenetkin"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+          echo "Repodaki dosyalar:"
+          find . -path ./.git -prune -o -type f -print | head -80
+          DIR=""
+          for s in $(find . -name settings.gradle -not -path './.git/*'); do
+            if grep -q "rootProject.name = 'FenEtkin'" "$s"; then
+              DIR=$(dirname "$s")
+              break
+            fi
+          done
+          if [ -z "$DIR" ]; then
+            while IFS= read -r z; do
+              T="$WORK/x"
+              rm -rf "$T"
+              mkdir -p "$T"
+              unzip -q -o "$z" -d "$T" 2>/dev/null || continue
+              s=$(grep -rl --include=settings.gradle "rootProject.name = 'FenEtkin'" "$T" | head -1 || true)
+              if [ -n "$s" ]; then
+                echo "Zip icinden acildi: $z"
+                DIR=$(dirname "$s")
+                break
+              fi
+            done < <(find . -iname '*.zip' -not -path './.git/*')
+          fi
+          if [ -z "$DIR" ]; then
+            fail "FenEtkin projesi bulunamadi. Repoya FenEtkin-APK-Projesi.zip dosyasini yukle, zipi acmana gerek yok."
+            exit 1
+          fi
+          DIR=$(cd "$DIR" && pwd)
+          echo "Proje klasoru: $DIR"
+          for f in settings.gradle build.gradle gradle.properties src/main/AndroidManifest.xml src/main/java/tr/com/fenetkin/app/MainActivity.java src/main/res/mipmap-xhdpi/ic_launcher.png src/main/res/mipmap-xxxhdpi/ic_launcher.png; do
+            [ -f "$DIR/$f" ] || fail "Eksik dosya: $f"
+          done
+          if [ -f "$DIR/src/main/AndroidManifest.xml" ]; then
+            python3 -c "import sys, xml.dom.minidom as m; m.parse(sys.argv[1])" "$DIR/src/main/AndroidManifest.xml" 2>/dev/null || fail "AndroidManifest.xml bozuk"
+          fi
+          J="$DIR/src/main/java/tr/com/fenetkin/app/MainActivity.java"
+          if [ -f "$J" ]; then
+            python3 -c "import sys; t=open(sys.argv[1]).read(); sys.exit(0 if t.count('{')==t.count('}') and t.count('(')==t.count(')') else 1)" "$J" || fail "MainActivity.java icinde parantez veya suslu parantez eksik"
+            grep -q "^package tr.com.fenetkin.app;" "$J" || fail "MainActivity.java package satiri yanlis"
+          fi
+          grep -q "tr.com.fenetkin.app" "$DIR/build.gradle" || fail "build.gradle icinde namespace yok"
+          grep -q "geckoview" "$DIR/build.gradle" || fail "build.gradle icinde geckoview yok"
+          grep -q "maven.mozilla.org" "$DIR/settings.gradle" || fail "settings.gradle icinde Mozilla maven adresi yok"
+          if [ "$ERR" = 1 ]; then
+            exit 1
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Kontrol tamam"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
-      - run: gradle assembleDebug --stacktrace
+
+      - name: Derle
+        working-directory: ${{ steps.proje.outputs.dir }}
+        run: gradle assembleDebug --console=plain 2>&1 | tee build.log
+
+      - name: Hata ozeti
+        if: failure()
+        run: |
+          D="${{ steps.proje.outputs.dir }}"
+          if [ -n "$D" ] && [ -f "$D/build.log" ]; then
+            grep -E "error:|What went wrong|Execution failed|Could not |Caused by|Minimum supported|minSdk|requires" -A3 "$D/build.log" | head -40 > "$RUNNER_TEMP/ozet.txt" || true
+            { echo "## Hata ozeti"; echo '```'; cat "$RUNNER_TEMP/ozet.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$(head -10 "$RUNNER_TEMP/ozet.txt" | paste -sd' ' -)"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: FenEtkin-apk
-          path: build/outputs/apk/debug/*.apk
+          path: ${{ steps.proje.outputs.dir }}/build/outputs/apk/debug/*.apk
